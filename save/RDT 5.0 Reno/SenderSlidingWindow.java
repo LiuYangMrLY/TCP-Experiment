@@ -4,8 +4,7 @@ import com.ouc.tcp.client.Client;
 import com.ouc.tcp.client.UDT_Timer;
 import com.ouc.tcp.message.TCP_PACKET;
 
-import java.util.Hashtable;
-import java.util.TimerTask;
+import java.util.*;
 
 public class SenderSlidingWindow {
     private Client client;
@@ -13,7 +12,7 @@ public class SenderSlidingWindow {
     private volatile int ssthresh = 16;
     private int count = 0;  // 拥塞避免： cwmd = cwmd + 1 / cwnd，每一个对新包的 ACK count++，所以 count == cwmd 时，cwnd = cwnd + 1
     private Hashtable<Integer, TCP_PACKET> packets = new Hashtable<>();
-    private Hashtable<Integer, UDT_Timer> timers = new Hashtable<>();
+    private UDT_Timer timer;
     private int lastACKSequence = -1;
     private int lastACKSequenceCount = 0;
 
@@ -28,8 +27,11 @@ public class SenderSlidingWindow {
     public void putPacket(TCP_PACKET packet) {
         int currentSequence = (packet.getTcpH().getTh_seq() - 1) / 100;
         this.packets.put(currentSequence, packet);
-        this.timers.put(currentSequence, new UDT_Timer());
-        this.timers.get(currentSequence).schedule(new RetransmitTask(this.client, packet, this), 3000, 3000);
+
+        if (this.timer == null) {
+            this.timer = new UDT_Timer();
+            this.timer.schedule(new RetransmitTask(this), 3000, 3000);
+        }
     }
 
     public void receiveACK(int currentSequence) {
@@ -39,21 +41,30 @@ public class SenderSlidingWindow {
                 TCP_PACKET packet = this.packets.get(currentSequence + 1);
                 if (packet != null) {
                     this.client.send(packet);
-                    this.timers.get(currentSequence + 1).cancel();
-                    this.timers.put(currentSequence + 1, new UDT_Timer());
-                    this.timers.get(currentSequence + 1).schedule(new RetransmitTask(this.client, packet, this), 3000, 3000);
+
+                    if (this.timer != null) {
+                        this.timer.cancel();
+                    }
+                    this.timer = new UDT_Timer();
+                    this.timer.schedule(new RetransmitTask(this), 3000, 300);
                 }
 
                 fastRecovery();
             }
         } else {
-            for (int i = this.lastACKSequence + 1; i <= currentSequence; i++) {
-                this.packets.remove(i);
+            List sequenceList = new ArrayList(this.packets.keySet());
+            Collections.sort(sequenceList);
+            for (int i = 0; i < sequenceList.size() && (int) sequenceList.get(i) <= currentSequence; i++) {
+                this.packets.remove(sequenceList.get(i));
+            }
 
-                if (this.timers.containsKey(i)) {
-                    this.timers.get(i).cancel();
-                    this.timers.remove(i);
-                }
+            if (this.timer != null) {
+                this.timer.cancel();
+            }
+
+            if (this.packets.size() != 0) {
+                this.timer = new UDT_Timer();
+                this.timer.schedule(new RetransmitTask(this), 3000, 300);
             }
 
             this.lastACKSequence = currentSequence;
@@ -77,6 +88,9 @@ public class SenderSlidingWindow {
         System.out.println("00000 cwnd: " + this.cwnd);
         System.out.println("00000 ssthresh: " + this.ssthresh);
         this.ssthresh = this.cwnd / 2;
+        if (this.ssthresh < 2) {
+            this.ssthresh = 2;
+        }
         this.cwnd = 1;
         System.out.println("11111 cwnd: " + this.cwnd);
         System.out.println("11111 ssthresh: " + this.ssthresh);
@@ -87,27 +101,49 @@ public class SenderSlidingWindow {
         System.out.println("00000 cwnd: " + this.cwnd);
         System.out.println("00000 ssthresh: " + this.ssthresh);
         this.ssthresh = this.cwnd / 2;
+        if (this.ssthresh < 2) {
+            this.ssthresh = 2;
+        }
         this.cwnd = this.ssthresh;
         System.out.println("11111 cwnd: " + this.cwnd);
         System.out.println("11111 ssthresh: " + this.ssthresh);
     }
+
+    public void retransmit() {
+        this.timer.cancel();
+
+        List sequenceList = new ArrayList(this.packets.keySet());
+        Collections.sort(sequenceList);
+
+        for (int i = 0; i < this.cwnd && i < sequenceList.size(); i++) {
+            TCP_PACKET packet = this.packets.get(sequenceList.get(i));
+            if (packet != null) {
+                System.out.println("retransmit: " + (packet.getTcpH().getTh_seq() - 1) / 100);
+                this.client.send(packet);
+            }
+        }
+
+        if (this.packets.size() != 0) {
+            this.timer = new UDT_Timer();
+            this.timer.schedule(new RetransmitTask(this), 3000, 3000);
+        } else {
+            System.out.println("000000000000000000 no packet");
+        }
+    }
 }
 
 class RetransmitTask extends TimerTask {
-    private Client client;
-    private TCP_PACKET packet;
     private SenderSlidingWindow window;
 
-    public RetransmitTask(Client client, TCP_PACKET packet, SenderSlidingWindow window) {
-        this.client = client;
-        this.packet = packet;
+    public RetransmitTask(SenderSlidingWindow window) {
         this.window = window;
     }
 
     @Override
     public void run() {
+        System.out.println("--- Time Out ---");
         this.window.slowStart();
 
-        this.client.send(this.packet);
+        this.window.retransmit();
     }
 }
