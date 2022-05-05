@@ -32,5 +32,5 @@ Java version: 1.8
 
 运行日志存放于 Log.txt，接收的数据存放于 recvData.txt。
 
-如果要从零编写代码实现 TCP 可靠传输，请下载 v1.0 版本 [TCP-Experiment-1.0](https://github.com/249606097/TCP-Experiment/releases/tag/v1.0)。
+如果要从零编写代码实现 TCP 可靠传输，请下载 v1.0 版本 [TCP-Experiment-1.0](https://github.com/LiuYangMrLY/TCP-Experiment/releases/tag/v1.0)。
 
